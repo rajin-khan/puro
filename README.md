@@ -1,6 +1,6 @@
 # Puro
 
-A private Finnish learning app for Rajin and Labbaiqua, focused on study and work in Finland. HTML, CSS, and JavaScript, with Supabase Auth and PostgreSQL for shared progress. No framework or build step.
+A private Finnish learning app for Rajin and Labbaiqua, focused on study and work in Finland. HTML, CSS, and JavaScript, with Supabase Auth and PostgreSQL for shared progress. No framework or package installation. A small Node build generates deployment metadata.
 
 60 lessons, 300 answer checks, 385 course vocabulary entries, custom words, spaced recall, a mistake notebook, mixed level checks, writing drafts, 12 partner role-plays, and 10 guided missions using real Finnish. A1 and A2 have 18 lessons each; B1 through C2 have six each.
 
@@ -34,7 +34,13 @@ Open http://127.0.0.1:4280. For another port, use `PORT=3000 node preview.mjs`. 
 
 ## Deploy to Vercel yourself
 
-Import the folder with `vercel.json` at the project root. Use the Other framework preset. The checked-in configuration skips installation and builds and serves `public/`. No Vercel environment variables are required; the public Supabase URL and publishable key are already in `public/config.js`. No server or service-role key is needed.
+Import the folder with `vercel.json` at the project root. Use the Other framework preset. Keep the checked-in settings: install command empty, build command `node build.mjs --deploy`, output directory `public`. This build uses only Node’s standard library. It installs no packages and runs no server in production.
+
+Keep Vercel’s system environment variables enabled (Project Settings → Environment Variables). The deployment build uses `VERCEL_PROJECT_PRODUCTION_URL` to generate the canonical URL, absolute social-image URLs, `robots.txt`, and `sitemap.xml`. Your Vercel domain is detected automatically. To pin a particular custom domain, set `SITE_URL` to its HTTPS origin, such as `https://your-domain.com`, with no path or hash. Invalid or missing production URLs stop the build instead of shipping incorrect metadata.
+
+The public Supabase URL and publishable key are already in `public/config.js`. No server or service-role key is needed. Account progress stays behind authentication. The public entry page can be indexed; local and preview builds use `noindex`. Preview builds still point their canonical and share-image links to the production domain. Authenticated app views also switch their robots meta tag to `noindex`; that is an indexing instruction, while Supabase authentication and access policies protect the actual data.
+
+After deployment, verify the canonical and image URL in View Source, open `/social/puro-og.png`, `/favicon.svg`, `/robots.txt`, and `/sitemap.xml`, and confirm they use the intended production domain. Submit the sitemap in Google Search Console if you want to track discovery. Search rankings and third-party sharing caches cannot be verified before a public deployment exists. See `docs/seo.md` for the asset list and checks.
 
 The preview and deployed site use the same Supabase project. Signing in to the same account loads the same cloud progress across origins and devices. This copy has not been published.
 
@@ -69,9 +75,10 @@ Answer checks cover taught examples and accepted forms. Open writing, role-plays
 ```sh
 node check.mjs
 node cloud-check.mjs
+node seo-check.mjs
 ```
 
-The first check covers course structure, answer keys, checkpoint coverage, recall scheduling, old local storage, backups, validation, syntax, and hosting configuration. The cloud check exercises account isolation, second-device loads, pending-save recovery, stale and simultaneous saves, archived conflicts, invalid remote data, and storage failures with an isolated SDK mock.
+The first check covers course structure, answer keys, checkpoint coverage, recall scheduling, old local storage, backups, validation, syntax, and hosting configuration. The cloud check exercises account isolation, second-device loads, pending-save recovery, stale and simultaneous saves, archived conflicts, invalid remote data, and storage failures with an isolated SDK mock. The SEO check covers assets, real image dimensions, metadata, domain validation, preview exclusion, the sitemap, CSP, and repeatable builds in a temporary directory.
 
 `supabase/verify.sql` was run against the new empty project. It used uncommitted Auth fixtures to test owner saves, partner summaries, private writing, denied outsider and anonymous access, invalid data, and stale revisions. All fixtures were rolled back, leaving zero test users and test progress rows. Both real confirmed accounts were then checked with their actual identities; those temporary test writes were also rolled back before their empty profiles were initialized. The script deliberately refuses to run after the real learner accounts exist. Do not use it as a recurring production test.
 

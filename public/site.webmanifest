@@ -1,0 +1,32 @@
+{
+  "name": "Puro \u00b7 Learn Finnish",
+  "short_name": "Puro",
+  "description": "Your personal Finnish learning space.",
+  "id": "/",
+  "start_url": "/#home",
+  "scope": "/",
+  "lang": "en",
+  "display": "standalone",
+  "background_color": "#f5f7f2",
+  "theme_color": "#183c35",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

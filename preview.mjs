@@ -6,12 +6,13 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const config = JSON.parse(await readFile(new URL('./vercel.json', import.meta.url), 'utf8'));
 const headers = Object.fromEntries(config.headers[0].headers.map(({key,value}) => [key,value]));
-const types = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.jpg':'image/jpeg'};
+const types = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.jpg':'image/jpeg','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.webmanifest':'application/manifest+json','.xml':'application/xml; charset=utf-8','.txt':'text/plain; charset=utf-8'};
 const port = Number(process.env.PORT || 4280);
 const server = createServer(async (req,res) => {
   if (!['GET','HEAD'].includes(req.method)) {res.writeHead(405, headers);res.end('Method not allowed');return;}
   try {
     const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    if (path === '/index.html') {res.writeHead(308, {...headers, Location:'/'});res.end();return;}
     const file = resolve(root, path === '/' ? 'index.html' : '.' + path);
     if (!file.startsWith(resolve(root) + sep)) {res.writeHead(404, headers);res.end('Not found');return;}
     const body = await readFile(file);

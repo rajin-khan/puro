@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node preview.mjs",
-    "check": "node check.mjs && node cloud-check.mjs"
+    "check": "node check.mjs && node cloud-check.mjs && node seo-check.mjs",
+    "build": "node build.mjs"
   }
 }

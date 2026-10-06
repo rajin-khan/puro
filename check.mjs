@@ -114,7 +114,7 @@ const config = JSON.parse(readFileSync(new URL('./vercel.json', import.meta.url)
 assert.equal(config.outputDirectory, 'public');
 assert.equal(config.framework, null);
 assert.equal(config.installCommand, '');
-assert.equal(config.buildCommand, '');
+assert.equal(config.buildCommand, 'node build.mjs --deploy');
 assert(existsSync(new URL('./public/index.html', import.meta.url)));
 for (const file of readdirSync(new URL('./public/', import.meta.url)).filter(f => f.endsWith('.js')))
   execFileSync(process.execPath, ['--check', new URL('./public/' + file, import.meta.url).pathname]);
