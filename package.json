@@ -1,0 +1,9 @@
+{
+  "name": "puro-finnish",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node preview.mjs",
+    "check": "node check.mjs && node cloud-check.mjs"
+  }
+}
