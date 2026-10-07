@@ -1,5 +1,5 @@
-export const normalizeAnswer=text=>String(text).normalize('NFC').trim().toLocaleLowerCase('fi').replace(/[.,!?]/g,'').replace(/\s+/g,' ');
-export function answerIsCorrect(question,answer){return question.type==='input'?question.answers.some(value=>normalizeAnswer(value)===normalizeAnswer(answer)):Number(answer)===question.answer;}
+export const normalizeAnswer=text=>String(text).normalize('NFC').trim().toLocaleLowerCase('fi').replace(/\p{P}/gu,'').replace(/\s+/g,' ');
+export function answerIsCorrect(question,answer){return question.type==='input'?question.answers.some(value=>normalizeAnswer(value)===normalizeAnswer(answer)):(typeof answer==='number'||typeof answer==='string')&&String(answer).trim()!==''&&Number.isInteger(Number(answer))&&Number(answer)===question.answer;}
 export const reviewIntervals=[1,3,7,14,30,60,120];
 export function scheduleReview(previous,correct,now=Date.now()){
   if(!correct)return {stage:0,due:now+600000};
@@ -15,4 +15,13 @@ export function checkpointQuestions(lessons,level,random=Math.random){
   const rest=pool.filter(item=>!selected.has(item.id));
   const mix=list=>{for(let i=list.length-1;i>0;i--){const j=Math.floor(random()*(i+1));[list[i],list[j]]=[list[j],list[i]];}return list;};
   return mix([...mix(first).slice(0,15),...mix(rest).slice(0,Math.max(0,15-first.length))]);
+}
+
+// Calendar keys use the learner's local day, independent of locale formatting.
+export const localDate=(date=new Date())=>[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
+export function vocabulary(lessons,state){
+ const map=new Map();for(const lesson of lessons)for(const [fi,en] of lesson.words)if(!map.has(fi))map.set(fi,{fi,en,level:lesson.level,lesson:lesson.id});
+ for(const [fi,value] of Object.entries(state?.customWords||{}))if(!map.has(fi))map.set(fi,{fi,en:value.en,level:value.level,lesson:null});
+ for(const fi of Object.keys(state?.review||{}))if(!map.has(fi))map.set(fi,{fi,en:'Meaning missing. Add this word with its English meaning.',level:'',lesson:null,missing:true});
+ return [...map.values()];
 }

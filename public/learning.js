@@ -1,26 +1,27 @@
 import {pairStatus,refreshPair} from './cloud.js';
 import './studio.js';
 import {LEVELS,LESSONS} from './course.js';
-import {extend,getState,markUnsaved,render,navigate,escape,icon,persist,showToast,localDate,setBusy} from './app.js';
+import {extend,getState,markUnsaved,render,navigate,escape,icon,persist,showToast,localDate,setBusy,archiveCurrentWork,showDialog,dueWords} from './app.js';
 import {profileSnapshots,activeProfile,parseBackup} from './storage.js';
 import {PAIR_TASKS,MISSIONS,WEEK_PLAN} from './practice-data.js';
 import {questionBank,answerIsCorrect,scheduleReview,checkpointQuestions} from './study.js';
 const $=selector=>document.querySelector(selector);
 const heading=(eyebrow,title,description)=>'<div class="page-title"><span class="eyebrow">'+eyebrow+'</span><h1>'+title+'</h1><p>'+description+'</p></div>';
 const next=()=>LESSONS.find(lesson=>!getState().completed[lesson.id])||LESSONS.at(-1);
+let importOpener=null;
 let pairLevel='A1',missionLevel='A1',assessmentLevel='A1',quiz=null,backupCandidate=null;
 const bank=questionBank(LESSONS),byId=new Map(bank.map(item=>[item.id,item]));
 const dueMistakes=()=>Object.entries(getState().mistakes).filter(([id,value])=>value.due<=Date.now()&&byId.has(id)).map(([id])=>byId.get(id));
 const levelSelect=(id,label,value)=>'<label class="level-select">'+label+'<select id="'+id+'">'+LEVELS.map(level=>'<option '+(level.id===value?'selected':'')+'>'+level.id+'</option>').join('')+'</select></label>';
 function plan(){
- const state=getState(),lesson=next(),due=Object.values(state.review).filter(word=>word.due<=Date.now()).length,mistakes=dueMistakes().length;
+ const state=getState(),lesson=next(),due=dueWords().length,mistakes=dueMistakes().length;
  const today=WEEK_PLAN[(new Date().getDay()+6)%7];
  return '<section class="daily-plan"><div class="section-heading"><div><span class="eyebrow">A SESSION WITH A PURPOSE</span><h2>Make today count.</h2></div><a href="#study-plan">Your weekly rhythm '+icon('chevron')+'</a></div><div class="session-steps"><a href="#review"><span class="step-num">01</span><div><strong>Recall familiar words</strong><small>'+due+' due · recall before reveal</small></div>'+icon('chevron')+'</a><a href="#checks"><span class="step-num">02</span><div><strong>Revisit a tricky pattern</strong><small>'+mistakes+' due · or try a level check</small></div>'+icon('chevron')+'</a><button data-action="lesson" data-id="'+lesson.id+'"><span class="step-num">03</span><div><strong>'+escape(lesson.title)+'</strong><small>'+lesson.level+' · learn, notice, use</small></div>'+icon('chevron')+'</button></div><div class="plan-foot"><span>'+today.day+' focus · '+today.focus+'</span><a href="#missions">Add real Finnish to your week '+icon('external')+'</a></div></section>';
 }
 function partnerPanels(){
  const state=getState(),pair=pairStatus(),profiles=pair.profiles.length?structuredClone(pair.profiles):[{id:'rajin',name:'Rajin',lessons:0,words:0,started:false,unknown:true},{id:'labbaiqua',name:'Labbaiqua',lessons:0,words:0,started:false,unknown:true}];
  for(const profile of profiles)if(profile.id===activeProfile()){profile.unknown=false;profile.name=state.name;profile.lessons=Object.keys(state.completed).length;profile.words=Object.keys(state.review).length;profile.minutes=Object.values(state.days).reduce((a,b)=>a+b,0);profile.practiceRounds=Object.keys(state.sessions).length;}
- return '<div class="together-profiles">'+profiles.map(profile=>'<section class="learner-panel"><span class="profile-initial">'+escape(profile.name[0])+'</span><div><h2>'+escape(profile.name)+'</h2><p>'+(profile.unknown?'Progress not loaded yet':profile.lessons+' '+(profile.lessons===1?'lesson':'lessons')+' · '+profile.words+' collected words')+'</p><small>'+(profile.id===activeProfile()?'Your account':profile.unknown?'Waiting for the cloud':profile.started?'Partner’s synced progress':'Your partner has not started yet')+'</small><p class="partner-metrics">'+Math.floor(profile.minutes||0)+' study minutes · '+(profile.practiceRounds||0)+' role-plays logged</p></div></section>').join('')+'</div>';
+ return '<div class="together-profiles">'+profiles.map(profile=>'<section class="learner-panel"><span class="profile-initial">'+escape(profile.name[0])+'</span><div><h2>'+escape(profile.name)+'</h2><p>'+(profile.unknown?'Progress not loaded yet':profile.lessons+' '+(profile.lessons===1?'lesson':'lessons')+' · '+profile.words+' collected words')+'</p><small>'+(profile.id===activeProfile()?'Your account':profile.unknown?'Waiting for the cloud':profile.started?'Partner’s synced progress':'Your partner has not started yet')+'</small><p class="partner-metrics">'+Math.floor(profile.minutes||0)+' study minutes · '+(profile.practiceRounds||0)+' different role-plays practised</p></div></section>').join('')+'</div>';
 }
 function together(){
  const state=getState(),pair=pairStatus();
@@ -34,7 +35,7 @@ function quizView(){
  if(!quiz)return '';
  if(quiz.index>=quiz.items.length){const score=Math.round(quiz.firstCorrect/quiz.items.length*100),level=quiz.level||next().level;return '<section class="quiz-panel"><span class="completion-icon">'+icon('check')+'</span><span class="eyebrow">A USEFUL SNAPSHOT</span><h2>'+quiz.firstCorrect+' / '+quiz.items.length+' correct on the first try</h2><p>'+score+'% on this check. Retry corrections after a delay and try an unfamiliar mission before judging your broader ability.</p><p class="hint">'+(quiz.mode==='checkpoint'?'This result is saved in your learner profile.':'Your patterns have been rescheduled for review.')+'</p><div class="studio-actions"><button class="button secondary" data-action="close-quiz">Close result</button><a class="button primary" href="#missions">Use it with real Finnish</a></div></section>';}
  const item=quiz.items[quiz.index],q=item.question;
- return '<section class="quiz-panel" aria-label="Mixed Finnish check"><div class="panel-head"><span class="eyebrow">'+(quiz.mode==='checkpoint'?'LEVEL CHECK':'PATTERN REVIEW')+' · '+(quiz.index+1)+' / '+quiz.items.length+'</span><button class="icon-button" data-action="close-quiz" aria-label="Close mixed check">'+icon('close')+'</button></div><span class="hint">'+item.level+' · '+escape(item.title)+'</span><h2>'+escape(q.prompt)+'</h2>'+(q.type==='listen'?'<button class="button light" data-action="audio" data-text="'+escape(q.audio)+'">'+icon('volume')+'Play Finnish</button><details class="model-answer"><summary>Transcript / audio unavailable</summary><p lang="fi">'+escape(q.audio)+'</p></details>':'')+(q.type==='input'?'<label class="field-label" for="mixed-answer">Your answer in Finnish</label><input id="mixed-answer" autocomplete="off" autocapitalize="none" spellcheck="false" lang="fi" value="'+escape(quiz.answer??'')+'"><p class="hint">Capitalization and punctuation do not affect the check. Keep ä and ö.</p>':'<div class="choices">'+q.options.map((option,i)=>'<button class="choice '+(quiz.answer===i?'selected':'')+'" data-action="mixed-choice" data-index="'+i+'" aria-pressed="'+(quiz.answer===i)+'" '+(quiz.correct?'disabled':'')+'>'+escape(option)+'</button>').join('')+'</div>')+(quiz.checked?'<div class="feedback '+(quiz.correct?'':'wrong')+'" role="status"><strong>'+(quiz.correct?'Oikein!':'Try this pattern again.')+'</strong>'+escape(q.explanation)+'</div>':'')+'<div class="studio-actions"><button class="button primary" data-action="'+(quiz.correct?'next-mixed':'check-mixed')+'">'+(quiz.correct?'Next question':'Check answer')+'</button><a class="text-button" href="#grammar">Open grammar notes</a></div></section>';
+ return '<section class="quiz-panel" aria-label="Mixed Finnish check"><div class="panel-head"><span class="eyebrow">'+(quiz.mode==='checkpoint'?'LEVEL CHECK':'PATTERN REVIEW')+' · '+(quiz.index+1)+' / '+quiz.items.length+'</span><button class="icon-button" data-action="close-quiz" aria-label="Close mixed check">'+icon('close')+'</button></div><span class="hint">'+item.level+' · '+escape(item.title)+'</span><h2>'+escape(q.prompt)+'</h2>'+(q.type==='listen'?'<button class="button light" data-action="audio" data-text="'+escape(q.audio)+'">'+icon('volume')+'Play Finnish</button><details class="model-answer"><summary>Transcript / audio unavailable</summary><p lang="fi">'+escape(q.audio)+'</p></details>':'')+(q.type==='input'?'<label class="field-label" for="mixed-answer">Your answer in Finnish</label><input id="mixed-answer" autocomplete="off" autocapitalize="none" spellcheck="false" lang="fi" value="'+escape(quiz.answer??'')+'" '+(quiz.correct?'readonly':'')+'><p class="hint">Capitalization and punctuation do not affect the check. Keep ä and ö.</p>':'<div class="choices">'+q.options.map((option,i)=>'<button class="choice '+(quiz.answer===i?'selected':'')+'" data-action="mixed-choice" data-index="'+i+'" aria-pressed="'+(quiz.answer===i)+'" '+(quiz.correct?'disabled':'')+'>'+escape(option)+'</button>').join('')+'</div>')+(quiz.checked?'<div class="feedback '+(quiz.correct?'':'wrong')+'" role="status"><strong>'+(quiz.correct?'Oikein!':'Try this pattern again.')+'</strong>'+escape(q.explanation)+'</div>':'')+'<div class="studio-actions"><button class="button primary" data-action="'+(quiz.correct?'next-mixed':'check-mixed')+'">'+(quiz.correct?'Next question':'Check answer')+'</button><a class="text-button" href="#grammar">Open grammar notes</a></div></section>';
 }
 function extraRender(route){if(route==='dashboard-plan')return plan();if(route==='together')return together();if(route==='missions')return missions();if(route==='study-plan')return studyPlan();if(route==='checks')return checks();return '';}
 async function extraAction(action,target){
@@ -42,38 +43,45 @@ async function extraAction(action,target){
  if(action==='refresh-pair'){setBusy(target,true);try{await refreshPair();}finally{setBusy(target,false);}}else if(action==='log-pair'){
   const task=PAIR_TASKS.find(task=>task.id===target.dataset.id),checks=[...document.querySelectorAll('[data-pair-check="'+task.id+'"]')];
   if(checks.some(check=>!check.checked)){showToast('Complete the conversation and check each reflection before logging it.');checks.find(check=>!check.checked)?.focus();return;}
-  state.sessions[task.id]={date:new Date().toISOString(),rounds:(state.sessions[task.id]?.rounds||0)+1};await persist();render();showToast('Practice logged for '+state.name+'.');
+  setBusy(target,true);try{state.sessions[task.id]={date:new Date().toISOString(),rounds:(state.sessions[task.id]?.rounds||0)+1};await persist();render();showToast('Practice logged for '+state.name+'.');}catch(error){render();throw error;}finally{setBusy(target,false);}
  }else if(action==='finish-mission'){
   const id=target.dataset.id,text=$('#mission-'+id).value.trim();if(!text){showToast('Add your output or reflection before logging this mission.');$('#mission-'+id).focus();return;}
-  state.journal['mission-'+id]=text;state.missions[id]=new Date().toISOString();await persist();render();showToast('Your mission output is saved.');
+  setBusy(target,true);try{state.journal['mission-'+id]=text;state.missions[id]=new Date().toISOString();await persist();render();showToast('Your mission output is saved.');}finally{setBusy(target,false);}
  }else if(action==='start-drill'){
   const items=dueMistakes().slice(0,15);if(!items.length){showToast('No patterns are due. Try a level check or return after your corrections are scheduled.');return;}
   quiz={mode:'drill',items,index:0,firstCorrect:0,answer:null,checked:false,correct:false,attempted:false};render();$('.quiz-panel').scrollIntoView({block:'start'});
  }else if(action==='start-checkpoint'){
   quiz={mode:'checkpoint',level:assessmentLevel,items:checkpointQuestions(LESSONS,assessmentLevel),index:0,firstCorrect:0,answer:null,checked:false,correct:false,attempted:false};render();$('.quiz-panel').scrollIntoView({block:'start'});
- }else if(action==='mixed-choice'){quiz.answer=Number(target.dataset.index);quiz.checked=false;render();$('.choice.selected')?.focus();
+ }else if(action==='mixed-choice'){if(!quiz||quiz.busy||quiz.correct)return;quiz.answer=Number(target.dataset.index);quiz.checked=false;render();$('.choice.selected')?.focus();
  }else if(action==='check-mixed'){
-  const item=quiz.items[quiz.index];if(item.question.type==='input')quiz.answer=$('#mixed-answer').value;
-  if(quiz.answer===null||String(quiz.answer).trim()===''){showToast('Choose or type an answer first.');return;}
-  quiz.correct=answerIsCorrect(item.question,quiz.answer);quiz.checked=true;
-  if(!quiz.attempted&&quiz.correct)quiz.firstCorrect++;quiz.attempted=true;
-  if(quiz.mode==='drill'||!quiz.correct)state.mistakes[item.id]=scheduleReview(state.mistakes[item.id],quiz.correct);
-  await persist();render();$('.quiz-panel .studio-actions button')?.focus();
+  const session=quiz;if(!session||session.busy||session.correct)return;const item=session.items[session.index];if(!item)return;
+  if(item.question.type==='input')session.answer=$('#mixed-answer').value;
+  if(session.answer===null||String(session.answer).trim()===''){showToast('Choose or type an answer first.');$('#mixed-answer')?.focus();return;}
+  session.busy=true;setBusy(target,true);
+  try{session.correct=answerIsCorrect(item.question,session.answer);session.checked=true;
+   if(!session.attempted&&session.correct)session.firstCorrect++;session.attempted=true;
+   if(session.mode==='drill'||!session.correct)state.mistakes[item.id]=scheduleReview(state.mistakes[item.id],session.correct);
+   await persist();
+  }finally{session.busy=false;setBusy(target,false);if(quiz===session){render();$('.quiz-panel .studio-actions button')?.focus();}}
  }else if(action==='next-mixed'){
-  quiz.index++;quiz.answer=null;quiz.checked=false;quiz.correct=false;quiz.attempted=false;
-  if(quiz.index>=quiz.items.length&&quiz.mode==='checkpoint'){state.checkpoints[quiz.level]={score:Math.round(quiz.firstCorrect/quiz.items.length*100),date:new Date().toISOString()};await persist();}
-  render();$('.quiz-panel')?.scrollIntoView({block:'start'});
+  const session=quiz;if(!session||session.busy||!session.correct)return;session.busy=true;setBusy(target,true);
+  session.index++;session.answer=null;session.checked=false;session.correct=false;session.attempted=false;
+  try{
+  if(session.index>=session.items.length&&session.mode==='checkpoint'){state.checkpoints[session.level]={score:Math.round(session.firstCorrect/session.items.length*100),date:new Date().toISOString()};await persist();}
+  }finally{session.busy=false;setBusy(target,false);if(quiz===session){render();$('.quiz-panel')?.scrollIntoView({block:'start'});$('.quiz-panel h2')?.setAttribute('tabindex','-1');$('.quiz-panel h2')?.focus();}}
  }else if(action==='close-quiz'){quiz=null;render();
  }else if(action==='migrate-local'){
-  const local=profileSnapshots().find(profile=>profile.id===activeProfile());if(local.error){showToast(local.error);return;}if(!['completed','review','journal','days','missions','sessions','checkpoints'].some(key=>Object.keys(local.data[key]||{}).length)){showToast('No old local progress was found for this learner on this device.');return;}backupCandidate=parseBackup(JSON.stringify(local.data));$('#import-summary').textContent=backupCandidate.name+' · '+Object.keys(backupCandidate.completed).length+' completed lessons · '+Object.keys(backupCandidate.review).length+' collected words. This replaces your current account progress with the old local copy.';$('#import-dialog').showModal();
- }else if(action==='choose-backup'){$('#backup-file').click();
+  const local=profileSnapshots().find(profile=>profile.id===activeProfile());if(local.error){showToast(local.error);return;}if(!['completed','review','journal','days','missions','sessions','checkpoints'].some(key=>Object.keys(local.data[key]||{}).length)){showToast('No old local progress was found for this learner on this device.');return;}backupCandidate=parseBackup(JSON.stringify(local.data));$('#import-summary').textContent=backupCandidate.name+' · '+Object.keys(backupCandidate.completed).length+' completed lessons · '+Object.keys(backupCandidate.review).length+' collected words. This replaces your current account progress with the old local copy.';showDialog('#import-dialog');
+ }else if(action==='choose-backup'){importOpener=target;$('#backup-file').click();
  }else if(action==='cancel-import'){backupCandidate=null;$('#import-dialog').close();
  }else if(action==='confirm-import'){
-  if(!backupCandidate)return;await persist();
-  const data=getState(),previous=structuredClone(data);target.disabled=true;
-  try{for(const key of Object.keys(data))delete data[key];Object.assign(data,structuredClone(backupCandidate));await persist();backupCandidate=null;$('#import-dialog').close();render();showToast('The active learner’s backup has been restored.');}
-  catch(error){for(const key of Object.keys(data))delete data[key];Object.assign(data,previous);render();throw error;}
-  finally{target.disabled=false;}
+  if(!backupCandidate||target.disabled)return;setBusy(target,true);
+  try{
+   await persist();await archiveCurrentWork();const data=getState();
+   for(const key of Object.keys(data))delete data[key];Object.assign(data,structuredClone(backupCandidate));
+   backupCandidate=null;$('#import-dialog').close();window.dispatchEvent(new Event('puro-profilechange'));render();
+   await persist();showToast('The active learner’s backup has been restored.');
+  }finally{setBusy(target,false);}
  }
 }
 extend(extraRender,extraAction);render();
@@ -84,11 +92,11 @@ document.addEventListener('change',async event=>{
  else if(id==='check-level'){assessmentLevel=event.target.value;render();}
  else if(id==='backup-file'){
   const file=event.target.files[0];if(!file)return;
-  try{if(file.size>2500000)throw new Error('Choose a backup smaller than 2.5 MB.');backupCandidate=parseBackup(await file.text());$('#import-summary').textContent=backupCandidate.name+' · '+Object.keys(backupCandidate.completed).length+' completed lessons · '+Object.keys(backupCandidate.review).length+' collected words. This will replace '+getState().name+'’s current progress in their account.';$('#import-dialog').showModal();}catch(error){showToast(error.message);}event.target.value='';
+  try{if(file.size>2500000)throw new Error('Choose a backup smaller than 2.5 MB.');backupCandidate=parseBackup(await file.text());$('#import-summary').textContent=backupCandidate.name+' · '+Object.keys(backupCandidate.completed).length+' completed lessons · '+Object.keys(backupCandidate.review).length+' collected words. This will replace '+getState().name+'’s current progress in their account.';showDialog('#import-dialog',importOpener);}catch(error){showToast(error.message);}event.target.value='';
  }
 });
 let missionDraftTimer;
-document.addEventListener('input',event=>{if(event.target.dataset.missionDraft){getState().journal['mission-'+event.target.dataset.missionDraft]=event.target.value;markUnsaved();clearTimeout(missionDraftTimer);missionDraftTimer=setTimeout(()=>persist().catch(()=>{}),1200);}});
+document.addEventListener('input',event=>{if(event.target.id==='mixed-answer'&&quiz&&!quiz.correct){quiz.answer=event.target.value;quiz.checked=false;$('.quiz-panel .feedback')?.remove();}if(event.target.dataset.missionDraft){getState().journal['mission-'+event.target.dataset.missionDraft]=event.target.value;markUnsaved();clearTimeout(missionDraftTimer);missionDraftTimer=setTimeout(()=>persist().catch(()=>{}),1200);}});
 window.addEventListener('puro-profilechange',()=>{clearTimeout(missionDraftTimer);quiz=null;backupCandidate=null;render();});
 
 window.addEventListener('puro-pairupdate',()=>{const panels=$('#partner-summary'),status=$('#pair-sync-status'),pair=pairStatus();if(panels)panels.innerHTML=partnerPanels();if(status)status.textContent=pair.error||(pair.at?'Updated '+pair.at.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' · Refreshes every 30 seconds. Writing drafts and notes stay private.':'Loading partner progress…');});

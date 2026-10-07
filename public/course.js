@@ -367,7 +367,11 @@ imperative:{name:'Uusi kielemme · Imperative',url:'https://uusikielemme.fi/finn
 });
 // Retrieval of taught examples supplements recognition questions. Open production stays ungraded.
 for(const item of LESSONS){
-  for(const [fi,en] of item.examples.slice(0,2))item.questions.push(write('Recall the taught example for: '+en,[fi],'The taught example is: '+fi+' Other natural translations may exist; this check practises recalling this example.'));
+  for(const [fi,en] of item.examples.slice(0,2)){
+    const forms=fi.split(' → '),meanings=en.split(' → ');
+    const transformation=forms.length===2&&meanings.length===2;
+    item.questions.push(write(transformation?'Given '+forms[0]+' ('+meanings[0]+'), write the form meaning “'+meanings[1]+'”.':'Recall the taught example for: '+en,transformation?[forms[1],fi]:[fi],'The taught example is: '+fi+(/[.!?…]$/.test(fi)?' ':'. ')+(transformation?'Write the resulting Finnish form.':'Other natural translations may exist; this check practises recalling this example.')));
+  }
 }
 LESSONS.push(...EXTRA_LESSONS);
 const order=new Map(ORDER.map((id,index)=>[id,index]));

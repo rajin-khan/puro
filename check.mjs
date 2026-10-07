@@ -3,7 +3,7 @@ import {readFileSync, readdirSync, existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {LESSONS, LEVELS, SOURCES} from './public/course.js';
 import {emptyState, loadProgress, saveProgress, validateState, parseBackup, backupDocument, setActiveProfile, profileSnapshots} from './public/storage.js';
-import {normalizeAnswer, answerIsCorrect, scheduleReview, checkpointQuestions, questionBank} from './public/study.js';
+import {normalizeAnswer, answerIsCorrect, scheduleReview, checkpointQuestions, questionBank, localDate, vocabulary} from './public/study.js';
 import {PAIR_TASKS, MISSIONS, WEEK_PLAN} from './public/practice-data.js';
 
 assert.equal(LESSONS.length, 60);
@@ -38,6 +38,37 @@ for (const lesson of LESSONS) {
     }
   }
 }
+// Regression: learners supply the requested form, not the whole arrow example.
+const sounds=LESSONS.find(lesson=>lesson.id==='a1-sounds');
+assert(answerIsCorrect(sounds.questions[3],'talossa'));
+assert(answerIsCorrect(sounds.questions[4],'kylässä'));
+assert(!answerIsCorrect(sounds.questions[4],'kylassa'));
+assert(!answerIsCorrect(sounds.questions[3],'taloon'));
+const spontaneous=LESSONS.find(lesson=>lesson.id==='c2-spontaneous').questions[4];
+for(const ending of ['', '.', '...', '…'])assert(answerIsCorrect(spontaneous,'Jos ymmärsin kysymyksen oikein'+ending));
+for(const lesson of LESSONS)for(const question of lesson.questions){
+ for(const blank of ['', '   ', null, undefined])assert(!answerIsCorrect(question,blank),lesson.id+' rejects an empty answer');
+ if(question.type==='input')assert(!answerIsCorrect(question,'not the taught Finnish answer'));
+ else for(const invalid of [false,true,{},[],NaN,1.5,-1])assert(!answerIsCorrect(question,invalid));
+}
+assert.notEqual(normalizeAnswer('tuli'),normalizeAnswer('tuuli'));
+assert.equal(normalizeAnswer('“Hyvää, kiitos!”'),'hyvää kiitos');
+assert.equal(normalizeAnswer("'talossa' (talossa)"),'talossa talossa');
+assert.equal(localDate(new Date(2026,0,2,23,59)),'2026-01-02');
+assert.equal(localDate(new Date(2026,11,31,0,1)),'2026-12-31');
+const dateFormat=Intl.DateTimeFormat;
+Intl.DateTimeFormat=()=>({format:()=> '02/01/2026'});
+assert.equal(localDate(new Date(2026,0,2)),'2026-01-02');
+Intl.DateTimeFormat=dateFormat;
+const imported={...emptyState(),review:{'old-word':{stage:2,due:0}},customWords:{sisu:{en:'determination',level:'A1'}}};
+const words=vocabulary(LESSONS,imported);
+assert(words.find(word=>word.fi==='old-word').missing);
+assert.equal(words.find(word=>word.fi==='sisu').en,'determination');
+assert.equal(new Set(words.map(word=>word.fi)).size,words.length);
+imported.customWords['old-word']={en:'a recovered meaning',level:'A1'};
+assert(!vocabulary(LESSONS,imported).find(word=>word.fi==='old-word').missing);
+assert.equal(imported.review['old-word'].stage,2,'Reading vocabulary never deletes or reschedules imported progress');
+
 assert.equal(WEEK_PLAN.length, 7);
 assert.equal(PAIR_TASKS.length, 12);
 assert.equal(MISSIONS.length, 10);
@@ -119,5 +150,5 @@ assert(existsSync(new URL('./public/index.html', import.meta.url)));
 for (const file of readdirSync(new URL('./public/', import.meta.url)).filter(f => f.endsWith('.js')))
   execFileSync(process.execPath, ['--check', new URL('./public/' + file, import.meta.url).pathname]);
 assert(!readFileSync(new URL('./public/app.js', import.meta.url), 'utf8').includes('/api/progress'));
-const vocabulary = new Set(LESSONS.flatMap(l => l.words.map(([fi]) => fi))).size;
-console.log(`Passed: 60 lessons, 300 answer checks, ${vocabulary} vocabulary entries, two isolated profiles, legacy migration, backups, save conflicts, storage failures, recall scheduling, checkpoint selection, JavaScript syntax, and static Vercel configuration.`);
+const vocabularyCount = new Set(LESSONS.flatMap(l => l.words.map(([fi]) => fi))).size;
+console.log(`Passed: 60 lessons, 300 answer checks plus grading regressions, locale-independent date keys, imported vocabulary, ${vocabularyCount} vocabulary entries, two isolated profiles, legacy migration, backups, save conflicts, storage failures, recall scheduling, checkpoint selection, JavaScript syntax, and static Vercel configuration.`);

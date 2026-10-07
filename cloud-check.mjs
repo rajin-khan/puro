@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {makeCloudStore} from './public/cloud.js';
+import {makeCloudStore,validPairSummary} from './public/cloud.js';
 import {emptyState} from './public/storage.js';
 const memory=()=>{const map=new Map();return {map,getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,v),removeItem:k=>map.delete(k)};};
 let remote={data:emptyState('rajin'),revision:0},offline=false,calls=0;
@@ -50,4 +50,34 @@ const changed=makeCloudStore(sdk,{id:'different-account'},'rajin',memory());
 await assert.rejects(changed.save(work,remote.revision),e=>e.code==='42501');
 const wrong=makeCloudStore(sdk,user,'labbaiqua',memory());
 await assert.rejects(wrong.load(),/invalid learner/);
-console.log('Passed: cloud saves, second-device loading, account isolation, failed-save recovery, stale revision protection, archived conflicts, concurrent saves, invalid cloud data, and full browser storage.');
+const pair=[{id:'rajin',name:'Rajin',started:true,lessons:2,words:12,minutes:30,practiceRounds:1},{id:'labbaiqua',name:'Labbaiqua',started:false,lessons:0,words:0,minutes:0,practiceRounds:0}];
+assert(validPairSummary(pair));
+for(const malformed of [null,[],[pair[0]],[pair[0],pair[0]],[pair[0],{...pair[1],name:''}],[pair[0],{...pair[1],minutes:NaN}],[pair[0],{...pair[1],words:-1}]])assert(!validPairSummary(malformed));
+// Bad confirmations must never mark unsynced work as safely saved.
+for(const confirmation of [null,{}, {revision:-1},{revision:0},{revision:2},{revision:1.5}]){
+ const malformed=makeCloudStore({rpc:async()=>({data:confirmation})},user,'rajin',memory());
+ await assert.rejects(malformed.save(work,0),/invalid save confirmation/);
+ assert.equal(malformed.cached().pending,true);
+ assert.deepEqual(malformed.cached().data,work);
+ assert.equal(malformed.cached().revision,0);
+}
+for(const response of [null,{slot:'rajin',data:work,revision:-1}]){
+ const malformed=makeCloudStore({rpc:async()=>({data:response})},user,'rajin',memory());
+ await assert.rejects(malformed.load(),/invalid learner progress/);
+}
+const corrupt=memory();corrupt.setItem('puro:cloud:v1:'+user.id,JSON.stringify({data:work,revision:0,pending:'false'}));
+const corruptStore=makeCloudStore(sdk,user,'rajin',corrupt),beforeCorrupt=calls;
+await assert.rejects(corruptStore.load(),/recovery copy is invalid/);
+assert.equal(calls,beforeCorrupt);
+assert(corrupt.getItem('puro:cloud:v1:'+user.id),'Keep corrupt raw data available for recovery');
+// Restoring a backup archives the previous account state. A failed restore save
+// keeps the confirmed replacement as the single pending recovery snapshot.
+const restoredLocal=memory(),restoredStore=makeCloudStore(sdk,user,'rajin',restoredLocal);
+const previous=await restoredStore.load();await restoredStore.discardPending(previous.data,previous.revision);
+assert.deepEqual(restoredStore.recovery(),previous.data);
+offline=true;const imported={...previous.data,name:'Restored learner',journal:{'a1-hello':'Restored draft'}};
+await assert.rejects(restoredStore.save(imported,previous.revision),/recovery copy/);
+assert.deepEqual(restoredStore.cached().data,imported);
+assert.deepEqual(restoredStore.recovery(),previous.data);
+offline=false;assert.equal((await restoredStore.load()).data.name,'Restored learner');
+console.log('Passed: cloud saves, second-device loading, account isolation, failed-save recovery, stale revision protection, archived conflicts, concurrent saves, invalid cloud data and confirmations, full browser storage, corrupt recovery preservation, and backup restore recovery.');

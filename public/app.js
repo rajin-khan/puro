@@ -1,6 +1,7 @@
 import {startCloud,signOut,discardPending,cloudAccount,recoveryProgress} from './cloud.js';
 import {loadProgress,saveProgress,activeProfile,setActiveProfile,PROFILE_IDS,profileSnapshots,backupDocument} from './storage.js';
-import {normalizeAnswer} from './study.js';
+import {answerIsCorrect,localDate,vocabulary} from './study.js';
+export {localDate};
 import {LEVELS,LESSONS,SOURCES} from './course.js';
 const $=s=>document.querySelector(s);
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +11,7 @@ function hydrateIcons(root=document){root.querySelectorAll('[data-icon]').forEac
 let dirtyGeneration=0;
 let state,revision=0,loaded=false,saveQueue=Promise.resolve(),saveFailed=false,conflict=false;
 let activeLevel='A1',activeLesson=null,step=0,selection=null,checked=false,correct=false,lessonStart=0,mistakes=0,opener=null;
-let renderExtra=null,actionExtra=null,completionApplied=false;
+let renderExtra=null,actionExtra=null,completionApplied=false,lessonSession=0;
 export function extend(render,action){const previousRender=renderExtra,previousAction=actionExtra;renderExtra=(route,data)=>render(route,data)||previousRender?.(route,data)||'';actionExtra=async(a,target)=>{await action(a,target);if(previousAction)await previousAction(a,target);};}
 export function getState(){return state;}
 export function markUnsaved(){dirtyGeneration++;$('#save-state').textContent='Unsaved changes';}
@@ -20,9 +21,10 @@ export function setBusy(button,busy){
  if(!busy)button.querySelector('.busy-indicator')?.remove();
 }
 export function showToast(message,persistent=false){if(persistent)showToast.opener=document.activeElement;const host=document.querySelector('dialog[open]')||document.body;host.append($('#toast'));$('#toast-message').textContent=message;$('#toast button').hidden=!persistent;$('#toast').classList.add('visible');clearTimeout(showToast.timer);if(!persistent)showToast.timer=setTimeout(()=>$('#toast').classList.remove('visible'),4500);}
-export const localDate=(date=new Date())=>new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(date);
-export function dueWords(){return Object.entries(state?.review||{}).filter(([,r])=>r.due<=Date.now()).map(([word])=>word);}
-export function allWords(){const map=new Map();for(const l of LESSONS)for(const [fi,en] of l.words)if(!map.has(fi))map.set(fi,{fi,en,level:l.level,lesson:l.id});for(const [fi,v] of Object.entries(state?.customWords||{}))if(!map.has(fi))map.set(fi,{fi,en:v.en,level:v.level,lesson:null});return [...map.values()];}
+export const archiveCurrentWork=()=>discardPending(state,revision);
+export function showDialog(selector,trigger=document.activeElement){const dialog=$(selector);dialog.puroOpener=trigger;dialog.showModal();}
+export function dueWords(){const known=new Set(allWords().filter(word=>!word.missing).map(word=>word.fi));return Object.entries(state?.review||{}).filter(([word,r])=>known.has(word)&&r.due<=Date.now()).map(([word])=>word);}
+export const allWords=()=>vocabulary(LESSONS,state);
 export function speak(text){
  if(!('speechSynthesis' in window)){showToast('Audio is unavailable in this browser. You can read the Finnish text instead.',true);return false;}
  const voice=window.speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith('fi'));
@@ -32,7 +34,7 @@ export function speak(text){
 function saveError(message){$('#error-banner').hidden=false;$('#error-banner').innerHTML=escape(message)+' <button class="button secondary" data-action="'+(saveFailed?'backup':'retry-save')+'">'+(saveFailed?'Download current work':'Retry save')+'</button>'+(conflict?' <button class="text-button" data-action="reload">Load latest cloud</button>':' <button class="text-button" data-action="retry-save">Retry save</button>');$('#save-state').textContent='Changes not saved';}
 export function persist(){
  if(!loaded)return Promise.reject(new Error('Progress has not loaded.'));
- const snapshot=structuredClone(state),profile=activeProfile(),generation=dirtyGeneration;$('#save-state').textContent='Saving…';
+ const snapshot=structuredClone(state),profile=activeProfile(),generation=++dirtyGeneration;$('#save-state').textContent='Saving…';
  const task=saveQueue.then(async()=>{
   if(saveFailed)throw new Error('Saving is paused.');
   let body;try{body=await saveProgress(snapshot,revision,profile);}catch(error){if(error.code===409)conflict=true;throw error;}
@@ -40,7 +42,7 @@ export function persist(){
  });
  saveQueue=task.catch(e=>{saveFailed=true;saveError(e.message);});return task;
 }
-export function addStudyMinutes(minutes){const key=localDate();state.days[key]=Math.round(((state.days[key]||0)+minutes)*1000)/1000;}
+export function addStudyMinutes(minutes){if(!Number.isFinite(minutes)||minutes<=0)return;const key=localDate();state.days[key]=Math.round(((state.days[key]||0)+minutes)*1000)/1000;markUnsaved();}
 function nextLesson(){return LESSONS.find(l=>!state.completed[l.id])||LESSONS[0];}
 function currentLevel(){return nextLesson().level;}
 function streak(){let count=0;const d=new Date();if(!(state.days[localDate(d)]>0))d.setDate(d.getDate()-1);for(let i=0;i<370;i++){if(!(state.days[localDate(d)]>0))break;count++;d.setDate(d.getDate()-1);}return count;}
@@ -56,7 +58,7 @@ export function render(){
  $('#learner-profile').innerHTML=profileSnapshots().filter(profile=>!cloudAccount()||profile.id===activeProfile()).map(profile=>'<option value="'+profile.id+'" '+(profile.id===activeProfile()?'selected':'')+'>'+escape(profile.id===activeProfile()?state.name:profile.data.name)+'</option>').join('');$('#active-learner-name').textContent=state.name;$('#profile-name').textContent=state.name;$('#avatar').textContent=state.name.charAt(0).toUpperCase();const due=dueWords().length;$('#review-badge').hidden=!due;$('#review-badge').textContent=due;hydrateIcons();
 }
 export function navigate(route){if(location.hash==='#'+route)render();else location.hash=route;}
-export function openLesson(id){activeLesson=LESSONS.find(x=>x.id===id);if(!activeLesson){showToast('This lesson could not be found.');return;}const draft=state.draft?.id===id?state.draft:null;step=draft?Math.min(draft.step,2+(activeLesson.reading?1:0)+activeLesson.questions.length):0;mistakes=draft?.mistakes||0;completionApplied=false;selection=null;checked=false;correct=false;lessonStart=Date.now();opener=document.activeElement;renderLesson();$('#lesson-dialog').showModal();}
+export function openLesson(id){const lesson=LESSONS.find(x=>x.id===id);if(!lesson){showToast('This lesson could not be found.');return;}lessonSession++;activeLesson=lesson;const draft=state.draft?.id===id?state.draft:null;step=draft?Math.min(draft.step,2+(activeLesson.reading?1:0)+activeLesson.questions.length):0;mistakes=draft?.mistakes||0;completionApplied=false;selection=null;checked=false;correct=false;lessonStart=Date.now();opener=document.activeElement;renderLesson();showDialog('#lesson-dialog');}
 function lessonSource(l){const source=SOURCES[l.source]||SOURCES.grammar;return '<a class="source-link" href="'+source.url+'" target="_blank" rel="noopener">Further reading · '+source.name+'</a>';}
 function totalSteps(){return 3+activeLesson.questions.length+(activeLesson.reading?1:0);}
 function currentQuestion(){return activeLesson.questions[step-2-(activeLesson.reading?1:0)];}
@@ -71,43 +73,43 @@ function renderLesson(){
  $('#lesson-content').innerHTML='<div class="lesson-top"><div><span class="lesson-top-title">'+escape(l.title)+'</span><small>'+l.level+' · Guided lesson</small></div><div class="lesson-progress progress-track"><span style="width:'+Math.min(100,step/totalSteps()*100)+'%"></span></div><button class="icon-button" data-action="close-lesson" aria-label="Close lesson">'+icon('close')+'</button></div><div class="lesson-body">'+body+'</div><div class="lesson-bottom"><span>'+footer+'</span><button class="button primary" data-action="'+(step===completionStep?'finish-lesson':q&&!(checked&&correct)?'check-answer':step===productionStep?'complete-lesson':'next-step')+'">'+(step===completionStep?'Back to my space':q&&!(checked&&correct)?'Check answer':step===productionStep?'Finish lesson':'Continue')+'</button></div>';
  $('#lesson-dialog').scrollTop=0;
 }
-const normalize=normalizeAnswer;
 async function handleAction(target){
- const a=target.dataset.action;
+ if(target.disabled)return;const a=target.dataset.action;
  if(a==='dismiss-toast'){$('#toast').classList.remove('visible');if(showToast.opener?.isConnected)showToast.opener.focus();}
  else if(a==='lesson')openLesson(target.dataset.id);
  else if(a==='close-lesson'||a==='finish-lesson')$('#lesson-dialog').close();
  else if(a==='audio')speak(target.dataset.text);
  else if(a==='choice'){selection=Number(target.dataset.index);checked=false;renderLesson();$('#lesson-dialog .choice.selected')?.focus();}
  else if(a==='next-step'){step++;selection=null;checked=false;correct=false;renderLesson();persist().catch(()=>{});$('#lesson-content h2')?.setAttribute('tabindex','-1');$('#lesson-content h2')?.focus();}
- else if(a==='check-answer'){const q=currentQuestion();if(q.type==='input')selection=$('#question-answer').value;if(selection===null||String(selection).trim()===''){showToast('Choose or type an answer first.');$('#question-answer')?.focus();return;}correct=q.type==='input'?q.answers.some(x=>normalize(x)===normalize(selection)):selection===q.answer;checked=true;if(!correct){mistakes++;state.draft.mistakes=mistakes;state.mistakes[activeLesson.id+':'+(step-2-(activeLesson.reading?1:0))]={stage:0,due:Date.now()+600000};persist().catch(()=>{});}renderLesson();$('#lesson-status').textContent=(correct?'Correct. ':'Try again. ')+q.explanation;$('#lesson-dialog .lesson-bottom button')?.focus();}
+ else if(a==='check-answer'){const q=currentQuestion();if(q.type==='input')selection=$('#question-answer').value;if(selection===null||String(selection).trim()===''){showToast('Choose or type an answer first.');$('#question-answer')?.focus();return;}correct=answerIsCorrect(q,selection);checked=true;if(!correct){mistakes++;state.draft.mistakes=mistakes;state.mistakes[activeLesson.id+':'+(step-2-(activeLesson.reading?1:0))]={stage:0,due:Date.now()+600000};persist().catch(()=>{});}renderLesson();$('#lesson-status').textContent=(correct?'Correct. ':'Try again. ')+q.explanation;$('#lesson-dialog .lesson-bottom button')?.focus();}
  else if(a==='complete-lesson'){
-  const notes=$('#lesson-writing').value;state.journal[activeLesson.id]=notes;
+  const session=lessonSession,notes=$('#lesson-writing').value;state.journal[activeLesson.id]=notes;
   if(!completionApplied){state.draft=null;state.completed[activeLesson.id]={score:Math.round(activeLesson.questions.length/(activeLesson.questions.length+mistakes)*100),date:new Date().toISOString()};
   for(const [word] of activeLesson.words)if(!state.review[word])state.review[word]={stage:0,due:Date.now()};
   completionApplied=true;}setBusy(target,true);
-  try{await persist();step++;renderLesson();render();}catch{setBusy(target,false);}
+  try{await persist();if(session===lessonSession&&$('#lesson-dialog').open){step++;renderLesson();render();}}catch{setBusy(target,false);}
  }
  else if(a==='level'){activeLevel=target.dataset.level;navigate('path');}
  else if(a==='select-level'){activeLevel=target.dataset.level;render();}
  else if(a==='review')navigate('review');
- else if(a==='practice'){try{sessionStorage.setItem('puro-practice-tab',target.dataset.mode||'listen');}catch{}navigate('practice');}
+ else if(a==='practice'){window.dispatchEvent(new CustomEvent('puro-practicemode',{detail:target.dataset.mode||'listen'}));navigate('practice');}
  else if(a==='collect'){if(!state.review[target.dataset.word]){state.review[target.dataset.word]={stage:0,due:Date.now()};persist().then(()=>showToast('Added to your word collection.')).catch(()=>{});render();}}
- else if(a==='settings'){opener=document.activeElement;$('#display-name').value=state.name;$('#daily-goal').value=state.goal;$('#settings-dialog').showModal();}
+ else if(a==='settings'){opener=document.activeElement;$('#display-name').setCustomValidity('');$('#display-name').value=state.name;$('#daily-goal').value=state.goal;showDialog('#settings-dialog');}
  else if(a==='close-settings')$('#settings-dialog').close();
- else if(a==='retry-save'){saveFailed=false;$('#error-banner').hidden=true;persist().catch(()=>{});}
+ else if(a==='retry-save'){saveFailed=false;$('#error-banner').hidden=true;$('#toast').classList.remove('visible');persist().catch(()=>{});}
  else if(a==='backup'||a==='recovery-backup'){const data=a==='recovery-backup'?recoveryProgress():state;if(!data){showToast('No device recovery copy is available.');return;}const blob=new Blob([JSON.stringify(backupDocument(data),null,2)],{type:'application/json'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='puro-'+activeProfile()+'-backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);}
  else if(a==='reload'){await discardPending(state,revision);saveFailed=false;location.reload();}
  else if(a==='sign-out'){if(loaded)await persist();await signOut();}
  else if(a==='retry-load')load();
  else if(actionExtra)await actionExtra(a,target);
 }
+$('.skip').addEventListener('click',event=>{event.preventDefault();$('#main').focus();$('#main').scrollIntoView({block:'start'});});
 document.addEventListener('click',e=>{const target=e.target.closest('[data-action]');if(target)handleAction(target).catch(e=>showToast(e.message||'Something went wrong. Please try again.',true));});
 let lessonDraftTimer;
-document.addEventListener('input',e=>{if(e.target.id==='question-answer'){selection=e.target.value;checked=false;}if(e.target.id==='lesson-writing'){state.journal[activeLesson.id]=e.target.value;markUnsaved();clearTimeout(lessonDraftTimer);lessonDraftTimer=setTimeout(()=>persist().catch(()=>{}),1200);}});
-$('#settings-form').addEventListener('submit',async e=>{e.preventDefault();state.name=$('#display-name').value.trim();state.goal=Number($('#daily-goal').value);if(!state.name){$('#display-name').setCustomValidity('Enter your name.');$('#display-name').reportValidity();return;}const b=e.submitter;setBusy(b,true);try{await persist();$('#settings-dialog').close();render();showToast('Your daily goal is set.');}catch{}finally{setBusy(b,false);}});
+document.addEventListener('input',e=>{if(e.target.id==='question-answer'){selection=e.target.value;checked=false;$('#lesson-dialog .feedback')?.remove();}if(e.target.id==='lesson-writing'){state.journal[activeLesson.id]=e.target.value;markUnsaved();clearTimeout(lessonDraftTimer);lessonDraftTimer=setTimeout(()=>persist().catch(()=>{}),1200);}});
+$('#settings-form').addEventListener('submit',async e=>{e.preventDefault();const name=$('#display-name').value.trim();if(!name){$('#display-name').setCustomValidity('Enter your name.');$('#display-name').reportValidity();return;}state.name=name;state.goal=Number($('#daily-goal').value);const b=e.submitter;setBusy(b,true);try{await persist();$('#settings-dialog').close();render();showToast('Your daily goal is set.');}catch{}finally{setBusy(b,false);}});
 $('#display-name').addEventListener('input',()=>$('#display-name').setCustomValidity(''));
-for(const d of document.querySelectorAll('dialog'))d.addEventListener('close',()=>{if(d.contains($('#toast')))document.body.append($('#toast'));if(window.speechSynthesis)window.speechSynthesis.cancel();if(d.id==='lesson-dialog'&&activeLesson){const text=$('#lesson-writing')?.value;if(text!==undefined)state.journal[activeLesson.id]=text;persist().catch(()=>{});}if(opener?.isConnected)opener.focus();else $('#main').focus();});
+for(const d of document.querySelectorAll('dialog'))d.addEventListener('close',()=>{if(d.contains($('#toast')))document.body.append($('#toast'));if(window.speechSynthesis)window.speechSynthesis.cancel();if(d.id==='lesson-dialog'&&activeLesson){const text=$('#lesson-writing')?.value;if(text!==undefined)state.journal[activeLesson.id]=text;persist().catch(()=>{});}const trigger=d.puroOpener,returnTarget=trigger?.isConnected?trigger:[...document.querySelectorAll('[data-action]')].find(el=>trigger?.dataset.action&&el.dataset.action===trigger.dataset.action&&el.dataset.id===trigger.dataset.id);if(returnTarget)returnTarget.focus();else if(opener?.isConnected)opener.focus();else $('#main').focus();});
 window.addEventListener('hashchange',()=>{const more=$('.mobile-more');if(more)more.open=false;render();$('#main').focus();window.scrollTo(0,0);});
 window.addEventListener('beforeunload',e=>{if(saveFailed||['Saving…','Unsaved changes'].includes($('#save-state').textContent)){e.preventDefault();e.returnValue='';}});
 async function load(preloaded){try{const body=preloaded||await loadProgress();state=body.data;for(const key of ['customWords','mistakes','missions','sessions','checkpoints'])state[key]||={};revision=body.revision;loaded=true;saveFailed=false;conflict=false;saveQueue=Promise.resolve();$('#error-banner').hidden=true;$('#save-state').textContent='Saved to your account';render();if(body.problem){saveFailed=true;conflict=!!body.conflict;saveError(body.problem);}}catch(e){$('#main').innerHTML='<div class="empty"><span class="eyebrow">YOUR SAVED PROGRESS</span><h1>Your learning space is unavailable.</h1><p>'+escape(e.message)+'</p><button class="button primary" data-action="retry-load">Try again</button></div>';$('#save-state').textContent='Storage unavailable';}}

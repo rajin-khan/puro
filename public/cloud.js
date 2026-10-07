@@ -7,9 +7,12 @@ let client,account,summaries=[],summaryError='',summaryTime=null;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const cloudAccount=()=>account;
 export const pairStatus=()=>({profiles:summaries,error:summaryError,at:summaryTime});
+export function validPairSummary(profiles){
+ return Array.isArray(profiles)&&profiles.length===2&&new Set(profiles.map(profile=>profile?.id)).size===2&&profiles.every(profile=>profile&&['rajin','labbaiqua'].includes(profile.id)&&typeof profile.name==='string'&&!!profile.name.trim()&&typeof profile.started==='boolean'&&['lessons','words','minutes','practiceRounds'].every(key=>Number.isFinite(profile[key])&&profile[key]>=0));
+}
 export async function refreshPair(){
  if(!client||!account)return;
- try{summaries=await rpc('puro_pair_summary');summaryError='';summaryTime=new Date();}
+ try{const profiles=await rpc('puro_pair_summary');if(!validPairSummary(profiles))throw new Error('The cloud returned invalid partner progress.');summaries=profiles;summaryError='';summaryTime=new Date();}
  catch(error){summaryError='Partner progress could not refresh. '+error.message;}
  window.dispatchEvent(new Event('puro-pairupdate'));
 }
@@ -22,7 +25,7 @@ async function rpc(name,args){
 // a newer cloud revision without the learner choosing a backup restore.
 export function makeCloudStore(sdk,user,id,storage=localStorage){
  const cacheKey='puro:cloud:v1:'+user.id;
- const read=()=>{let raw;try{raw=storage.getItem(cacheKey);}catch{throw new Error('Browser storage is blocked. Enable site storage to protect unsynced work.');}if(!raw)return null;let c;try{c=JSON.parse(raw);}catch{throw new Error('Your recovery copy is unreadable. It has been kept.');}if(!validateState(c.data)||!Number.isSafeInteger(c.revision)||c.revision<0)throw new Error('Your recovery copy is invalid. It has been kept.');return c;};
+ const read=()=>{let raw;try{raw=storage.getItem(cacheKey);}catch{throw new Error('Browser storage is blocked. Enable site storage to protect unsynced work.');}if(!raw)return null;let c;try{c=JSON.parse(raw);}catch{throw new Error('Your recovery copy is unreadable. It has been kept.');}if(!c||!validateState(c.data)||!Number.isSafeInteger(c.revision)||c.revision<0||typeof c.pending!=='boolean')throw new Error('Your recovery copy is invalid. It has been kept.');return c;};
  const write=c=>{try{storage.setItem(cacheKey,JSON.stringify(c));}catch{throw new Error('Browser storage is full or blocked. Download your current work before closing.');}};
  const call=async(name,args)=>{const {data,error}=await sdk.rpc(name,args);if(error){const e=new Error(error.code==='PT409'?'Progress changed on another device. Download your work, then load the latest cloud progress.':error.code==='42501'?'Your account cannot access this learning space. Check your confirmed sign-in email.':'Cloud save failed. Your recovery copy stays on this device. Reconnect and retry.');e.code=error.code==='PT409'?409:error.code;throw e;}return data;};
  const assertOwner=requested=>{if(requested!==id)throw new Error('Sign in to your own account to edit progress.');};
@@ -32,6 +35,7 @@ export function makeCloudStore(sdk,user,id,storage=localStorage){
    const previous=read();if(previous&&previous.revision!==revision){const e=new Error('Progress changed in another tab. Download your work, then load the latest cloud progress.');e.code=409;throw e;}
    const pending={data:structuredClone(data),revision,pending:true};write(pending);
    const result=await call('puro_save',{progress:{owner:user.id,data},expected_revision:revision});
+   if(!result||!Number.isSafeInteger(result.revision)||result.revision!==revision+1)throw new Error('The cloud returned an invalid save confirmation. Your recovery copy has been kept.');
    write({...pending,revision:result.revision,pending:false});return {revision:result.revision};
   };
   return globalThis.navigator?.locks?navigator.locks.request(cacheKey,work):work();
@@ -40,7 +44,7 @@ export function makeCloudStore(sdk,user,id,storage=localStorage){
   async load(requested=id){
    assertOwner(requested);const cached=read();
    const remote=await call('puro_bootstrap');
-   if(remote.slot!==id||!validateState(remote.data)||!Number.isSafeInteger(remote.revision))throw new Error('The cloud returned invalid learner progress.');
+   if(!remote||remote.slot!==id||!validateState(remote.data)||!Number.isSafeInteger(remote.revision)||remote.revision<0)throw new Error('The cloud returned invalid learner progress.');
    if(cached?.pending){
     if(cached.revision!==remote.revision)return {...cached,problem:'A newer cloud version exists. Your unsynced work is still here. Download it before loading the latest cloud progress.',conflict:true};
     try{const result=await save(cached.data,cached.revision);return {data:cached.data,revision:result.revision};}
@@ -66,7 +70,7 @@ export async function startCloud(){
  client=globalThis.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false},global:{fetch:(url,options)=>fetch(url,{...options,signal:options?.signal||AbortSignal.timeout(20000)})}});
  const accept=async user=>{
   const id=LEARNERS[user.email?.toLowerCase()];if(!id)throw new Error('Use Rajin or Labbaiqua’s registered email.');
-  const body=await rpc('puro_bootstrap');if(body.slot!==id)throw new Error('This account does not match the learner profile.');
+  const body=await rpc('puro_bootstrap');if(!body||body.slot!==id)throw new Error('This account does not match the learner profile.');
   account=user;setActiveProfile(id);store=makeCloudStore(client,user,id);configureCloud(store);
   // Authenticated views contain personal work and must stay out of search results.
   const robots=document.querySelector('meta[name="robots"]');if(robots)robots.setAttribute('content','noindex, nofollow');
